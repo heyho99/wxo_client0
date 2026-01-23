@@ -1,76 +1,64 @@
 async function main(workbook: ExcelScript.Workbook) {
-    // 1. 設定項目
     const url = "https://get-log.25f0qwsr2onp.us-south.codeengine.appdomain.cloud/";
     const sheetName = "ログ";
+    const sheet = workbook.getWorksheet(sheetName) || workbook.addWorksheet(sheetName);
 
-    const sheet = workbook.getWorksheet(sheetName);
-    if (!sheet) {
-        // console.error ではなく console.log を使用します
-        console.log(`${sheetName} シートが見つかりません。シート名を確認してください。`);
-        return;
-    }
-
-    // 2. Code Engine から CSV データを取得
-    console.log("Code Engine からデータを取得中...");
+    console.log("データを取得して加工中...");
     try {
-        const response = await fetch(url);
+        const res = await fetch(url);
+        const text = await res.text();
 
-        if (!response.ok) {
-            console.log("データの取得に失敗しました。ステータス: " + response.status);
-            return;
+        // 1. CSV 解析 (既存のロジック)
+        let rows: string[][] = [];
+        let curRow: string[] = [], val = "", q = false;
+        for (let i = 0; i < text.length; i++) {
+            let c = text[i], n = text[i + 1];
+            if (c === '"') { if (q && n === '"') { val += '"'; i++; } else q = !q; }
+            else if (c === ',' && !q) { curRow.push(val); val = ""; }
+            else if ((c === '\n' || c === '\r') && !q) { if (c === '\r' && n === '\n') i++; curRow.push(val); rows.push(curRow); curRow = []; val = ""; }
+            else val += c;
         }
+        if (val || curRow.length > 0) { curRow.push(val); rows.push(curRow); }
 
-        const csvText = await response.text();
+        // --- 2. スクリプト側でヘッダーを強制挿入 ---
+        // Python がヘッダーを返さない前提で、配列の先頭に見出しを追加します
+        const headerNames = ["ID", "GAROON_ID", "氏名", "TIMESTAMP", "質問内容", "回答内容", "評価", "カテゴリ", "詳細テキスト"];
+        rows.unshift(headerNames);
 
-        // 3. CSV 解析 (引用符内の改行を保持するロジック)
-        const rows: string[][] = [];
-        let currentRow: string[] = [];
-        let currentValue = "";
-        let inQuotes = false;
-
-        for (let i = 0; i < csvText.length; i++) {
-            let char = csvText[i];
-            let nextChar = csvText[i + 1];
-
-            if (char === '"') {
-                if (inQuotes && nextChar === '"') {
-                    currentValue += '"';
-                    i++;
-                } else {
-                    inQuotes = !inQuotes;
-                }
-            } else if (char === ',' && !inQuotes) {
-                currentRow.push(currentValue);
-                currentValue = "";
-            } else if ((char === '\n' || char === '\r') && !inQuotes) {
-                if (char === '\r' && nextChar === '\n') i++;
-                currentRow.push(currentValue);
-                rows.push(currentRow);
-                currentRow = [];
-                currentValue = "";
-            } else {
-                currentValue += char;
-            }
-        }
-        if (currentRow.length > 0 || currentValue !== "") {
-            currentRow.push(currentValue);
-            rows.push(currentRow);
-        }
-
-        // 4. シートへの書き込み
+        // 3. シートのクリアと書き込み
+        if (sheet.getAutoFilter()) { sheet.getAutoFilter().remove(); }
         sheet.getUsedRange()?.clear();
-        if (rows.length > 0) {
-            const range = sheet.getRangeByIndexes(0, 0, rows.length, rows[0].length);
-            range.setValues(rows);
 
-            range.getFormat().setWrapText(true);
-            range.getFormat().setVerticalAlignment(ExcelScript.VerticalAlignment.top);
-            sheet.getUsedRange().getFormat().autofitColumns();
+        const rowCount = rows.length;
+        const colCount = rows[0].length;
+        const range = sheet.getRangeByIndexes(0, 0, rowCount, colCount);
+        range.setValues(rows);
+
+        // --- 4. 見た目の整形 ---
+        // ヘッダー行 (1行目) を装飾
+        const headerRange = range.getRow(0);
+        headerRange.getFormat().getFont().setBold(true);
+        headerRange.getFormat().getFill().setColor("#D9D9D9");
+
+        // フィルタを適用
+        sheet.getAutoFilter().apply(range);
+
+        // --- 5. TIMESTAMP 列 (D列 / インデックス 3) の全文表示 ---
+        // 固定で「4番目の列 (インデックス3)」を日時形式に設定します
+        const tsColIndex = 3;
+        if (rowCount > 1) {
+            const tsDataRange = range.getColumn(tsColIndex).getOffsetRange(1, 0).getResizedRange(rowCount - 2, 0);
+            tsDataRange.setNumberFormatLocal("yyyy-mm-dd hh:mm:ss");
         }
 
-        console.log("更新が正常に完了しました！");
+        // 全体の整形
+        range.getFormat().setVerticalAlignment(ExcelScript.VerticalAlignment.top);
+        range.getFormat().setWrapText(true);
+        sheet.getUsedRange().getFormat().autofitColumns();
 
-    } catch (error) {
-        console.log("実行中にエラーが発生しました: " + error);
+        console.log("ヘッダー合成と書式設定が完了しました！");
+
+    } catch (e) {
+        console.log("エラー: " + e);
     }
 }
