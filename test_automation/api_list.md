@@ -24,3 +24,13 @@ content-type: application/json
     "stream": false
 }
 ```
+
+### CodeEngineテストcurl
+```curl
+curl -X POST "https://wxo-test-auto.25f0qwsr2onp.us-south.codeengine.appdomain.cloud/" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "27e6dff3-4f30-42d4-b49a-d5c697328009",
+    "questions": ["機密と明示されたもののみ機密情報として扱うに変更してくれ"]
+  }'
+```
