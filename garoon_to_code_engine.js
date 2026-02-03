@@ -10,15 +10,15 @@
         apiUrl: "https://function-c3.25f0qwsr2onp.us-south.codeengine.appdomain.cloud/"
     };
 
-    // Watsonx Orchestrate 設定 (変更なし)
+    // Watsonx Orchestrate 設定
     const wxoConfig = {
         orchestrationID: "63c38798359e4eb9917d478a2b67fbfb_0e9590c3-c50a-4598-8e57-b604604cfc36",
         hostURL: "https://us-south.watson-orchestrate.cloud.ibm.com",
-        rootElementID: "wxo-chat-root",
+        rootElementID: "root",
         deploymentPlatform: "ibmcloud",
         crn: "crn:v1:bluemix:public:watsonx-orchestrate:us-south:a/63c38798359e4eb9917d478a2b67fbfb:0e9590c3-c50a-4598-8e57-b604604cfc36::",
         chatOptions: {
-            agentId: "4458e8a4-6bf7-4d8a-8b7d-2a16256b03d0",
+            agentId: "27e6dff3-4f30-42d4-b49a-d5c697328009",
             onLoad: onChatLoad,
         }
     };
