@@ -89,7 +89,7 @@ def main():
         return
 
     # 2. Send Message (using the example from api_list.md)
-    message = "仕入先がイグアス書式の契約書に合意してもらえない場合はどうすればいいでしょうか"
+    message = "機密と明示されたもののみ機密情報として扱うに変更してくれ"
     print(f"Sending message: {message}")
     
     response = send_chat_message(token, message)
