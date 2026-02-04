@@ -1,110 +1,141 @@
 /**
- * WXO Test Automation - Office Script
+ * WXO Test Automation v2 - Office Script
  * 
  * このスクリプトはExcel上で動作し、
- * A列から質問を読み取り、Code Engineエンドポイントに送信し、
- * 結果をB列（Answer）、C列（Status）に書き込みます。
+ * 「設定」シートから設定と質問データを読み込み、
+ * 「出力」シートに結果を出力します。
  * 
- * 使用方法:
- * 1. Excel for the Webでシートを開く
- * 2. A1に"Question"ヘッダー、A2以降に質問を入力
- * 3. このスクリプトを実行
- * 4. B列に回答、C列にステータスが出力される
+ * 設定シート構成:
+ *   A1: "CODE_ENGINE_URL"    B1: [エンドポイントURL]
+ *   A2: "AGENT_ID"           B2: [エージェントID]
+ *   A3: (空行)
+ *   A4: "質問" | "模範解答" | "必須単語1" | "必須単語2" | "必須単語3"  ← ヘッダー
+ *   A5~: [質問データ]
+ * 
+ * 出力シート構成 (自動生成):
+ *   A列: 質問
+ *   B列: 模範解答
+ *   C列: WXO回答
+ *   D列: 必須単語1
+ *   E列: 必須単語2
+ *   F列: 必須単語3
+ *   G列: 検索結果 [〇,×,-]
  */
 
 async function main(workbook: ExcelScript.Workbook) {
     // ===============================================================
-    // 設定
+    // シート名の設定
     // ===============================================================
-
-    // Code Engine Function のエンドポイント
-    // ※デプロイ後に実際のURLに置き換えてください
-    const CODE_ENGINE_URL = "https://wxo-test-auto.25f0qwsr2onp.us-south.codeengine.appdomain.cloud/";
-
-    // Agent IDを読み取るセル (E1)
-    const agentIdCell = "E1";
-
-    // シート設定
-    const sheetName = "Sheet1"; // 対象シート名
-    const startRowIndex = 1;    // データ開始行 (0-indexed, 行2から)
-    const questionColIndex = 0; // A列
-    const answerColIndex = 1;   // B列
-    const statusColIndex = 2;   // C列
+    const settingsSheetName = "設定";
+    const outputSheetName = "出力";
 
     // ===============================================================
-    // シートの取得と初期化
+    // 設定シートの読み込み
     // ===============================================================
-
-    const sheet = workbook.getWorksheet(sheetName);
-    if (!sheet) {
-        console.log(`シート "${sheetName}" が見つかりません。`);
+    const settingsSheet = workbook.getWorksheet(settingsSheetName);
+    if (!settingsSheet) {
+        console.log(`エラー: シート「${settingsSheetName}」が見つかりません。`);
         return;
     }
+
+    // 設定値の取得 (B1: URL, B2: Agent ID)
+    const codeEngineUrl = String(settingsSheet.getRange("B1").getValue() || "").trim();
+    const agentId = String(settingsSheet.getRange("B2").getValue() || "").trim();
+
+    if (!codeEngineUrl) {
+        console.log("エラー: CODE_ENGINE_URL が設定されていません (設定シート B1)。");
+        return;
+    }
+    if (!agentId) {
+        console.log("エラー: AGENT_ID が設定されていません (設定シート B2)。");
+        return;
+    }
+
+    console.log(`CODE_ENGINE_URL: ${codeEngineUrl}`);
+    console.log(`AGENT_ID: ${agentId}`);
+
+    // ===============================================================
+    // 設定シートから質問データを読み込み (A5から開始)
+    // ===============================================================
+    const settingsUsedRange = settingsSheet.getUsedRange();
+    if (!settingsUsedRange) {
+        console.log("設定シートにデータがありません。");
+        return;
+    }
+
+    const settingsValues = settingsUsedRange.getValues();
+    const settingsRowCount = settingsValues.length;
+
+    interface QuestionData {
+        question: string;
+        modelAnswer: string;
+        keyword1: string;
+        keyword2: string;
+        keyword3: string;
+    }
+
+    const questionDataList: QuestionData[] = [];
+    const dataStartRow = 4; // 行5から（0-indexed = 4）
+
+    for (let i = dataStartRow; i < settingsRowCount; i++) {
+        const question = String(settingsValues[i][0] || "").trim();
+        if (question) {
+            questionDataList.push({
+                question: question,
+                modelAnswer: String(settingsValues[i][1] || "").trim(),
+                keyword1: String(settingsValues[i][2] || "").trim(),
+                keyword2: String(settingsValues[i][3] || "").trim(),
+                keyword3: String(settingsValues[i][4] || "").trim()
+            });
+        }
+    }
+
+    if (questionDataList.length === 0) {
+        console.log("設定シートに質問が見つかりませんでした（A5以降を確認してください）。");
+        return;
+    }
+
+    console.log(`${questionDataList.length} 件の質問を処理します...`);
+
+    // ===============================================================
+    // 出力シートの準備
+    // ===============================================================
+    let outputSheet = workbook.getWorksheet(outputSheetName);
+    if (!outputSheet) {
+        outputSheet = workbook.addWorksheet(outputSheetName);
+        console.log(`シート「${outputSheetName}」を作成しました。`);
+    }
+
+    // 出力シートをクリア
+    outputSheet.getUsedRange()?.clear();
 
     // ヘッダー設定
-    const headerRange = sheet.getRange("A1:C1");
-    headerRange.setValues([["Question", "Answer", "Status"]]);
-
-    // Agent IDの読み取り
-    const agentId = String(sheet.getRange(agentIdCell).getValue() || "").trim();
-    if (!agentId) {
-        console.log(`エラー: セル ${agentIdCell} にAgent IDが設定されていません。`);
-        return;
-    }
-    console.log(`Agent ID: ${agentId}`);
-
-    // ヘッダーのフォーマット（太字、背景色）
+    const headerRange = outputSheet.getRange("A1:G1");
+    headerRange.setValues([["質問", "模範解答", "WXO回答", "必須単語1", "必須単語2", "必須単語3", "検索結果"]]);
     const headerFormat = headerRange.getFormat();
     headerFormat.getFill().setColor("D9D9D9");
     headerFormat.getFont().setBold(true);
 
-    const usedRange = sheet.getUsedRange();
-    if (!usedRange) {
-        console.log("シートにデータがありません（ヘッダーのみ）。");
-        return;
+    // 処理中ステータスを設定
+    for (let i = 0; i < questionDataList.length; i++) {
+        const qd = questionDataList[i];
+        const rowIdx = i + 1; // 行2から
+        outputSheet.getCell(rowIdx, 0).setValue(qd.question);
+        outputSheet.getCell(rowIdx, 1).setValue(qd.modelAnswer);
+        outputSheet.getCell(rowIdx, 2).setValue("処理中...");
+        outputSheet.getCell(rowIdx, 3).setValue(qd.keyword1);
+        outputSheet.getCell(rowIdx, 4).setValue(qd.keyword2);
+        outputSheet.getCell(rowIdx, 5).setValue(qd.keyword3);
+        outputSheet.getCell(rowIdx, 6).setValue("");
     }
-
-    // オートフィルター適用
-    sheet.getAutoFilter().apply(usedRange);
-
-    const values = usedRange.getValues();
-    const rowCount = values.length;
-
-    console.log(`${rowCount} 行見つかりました。`);
-
-    // ===============================================================
-    // 質問の収集
-    // ===============================================================
-
-    const questions: string[] = [];
-    const questionRows: number[] = []; // 質問がある行のインデックスを記録
-
-    for (let i = startRowIndex; i < rowCount; i++) {
-        const question = String(values[i][questionColIndex] || "").trim();
-        if (question) {
-            questions.push(question);
-            questionRows.push(i);
-        }
-    }
-
-    if (questions.length === 0) {
-        console.log("質問が見つかりませんでした。");
-        return;
-    }
-
-    console.log(`${questions.length} 件の質問を処理します...`);
 
     // ===============================================================
     // Code Engine に送信
     // ===============================================================
-
     try {
-        // 処理中ステータスを設定
-        for (const rowIdx of questionRows) {
-            sheet.getCell(rowIdx, statusColIndex).setValue("Processing...");
-        }
+        const questions = questionDataList.map(qd => qd.question);
 
-        const response = await fetch(CODE_ENGINE_URL, {
+        const response = await fetch(codeEngineUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -115,16 +146,14 @@ async function main(workbook: ExcelScript.Workbook) {
         if (!response.ok) {
             const errorText = await response.text();
             console.log(`エラー: ${response.status} - ${errorText}`);
-            for (const rowIdx of questionRows) {
-                sheet.getCell(rowIdx, statusColIndex).setValue(`Error: ${response.status}`);
+            for (let i = 0; i < questionDataList.length; i++) {
+                outputSheet.getCell(i + 1, 2).setValue(`Error: ${response.status}`);
             }
             return;
         }
 
         // CSVレスポンスの取得
         const csvText = await response.text();
-
-        // CSVのパース
         const results = parseCSV(csvText);
 
         console.log(`${results.length} 件の結果を受信しました。`);
@@ -132,21 +161,45 @@ async function main(workbook: ExcelScript.Workbook) {
         // ===============================================================
         // 結果をExcelに書き込み
         // ===============================================================
-
-        for (let i = 0; i < results.length && i < questionRows.length; i++) {
+        for (let i = 0; i < results.length && i < questionDataList.length; i++) {
             const result = results[i];
-            const rowIdx = questionRows[i];
+            const qd = questionDataList[i];
+            const rowIdx = i + 1;
+            const wxoAnswer = result.Answer || "";
 
-            sheet.getCell(rowIdx, answerColIndex).setValue(result.Answer || "");
-            sheet.getCell(rowIdx, statusColIndex).setValue(result.Status || "");
+            // WXO回答を書き込み (C列)
+            outputSheet.getCell(rowIdx, 2).setValue(wxoAnswer);
+
+            // 必須単語検索の実行
+            const searchResults: string[] = [];
+            const keywords = [qd.keyword1, qd.keyword2, qd.keyword3];
+
+            for (const keyword of keywords) {
+                if (!keyword) {
+                    searchResults.push("-");
+                } else if (wxoAnswer.includes(keyword)) {
+                    searchResults.push("〇");
+                } else {
+                    searchResults.push("×");
+                }
+            }
+
+            // 検索結果を書き込み (G列)
+            outputSheet.getCell(rowIdx, 6).setValue(searchResults.join(","));
+        }
+
+        // オートフィルター適用
+        const outputUsedRange = outputSheet.getUsedRange();
+        if (outputUsedRange) {
+            outputSheet.getAutoFilter().apply(outputUsedRange);
         }
 
         console.log("完了しました！");
 
     } catch (error) {
         console.log(`通信エラー: ${error}`);
-        for (const rowIdx of questionRows) {
-            sheet.getCell(rowIdx, statusColIndex).setValue(`Error: ${error}`);
+        for (let i = 0; i < questionDataList.length; i++) {
+            outputSheet.getCell(i + 1, 2).setValue(`Error: ${error}`);
         }
     }
 }
@@ -176,11 +229,9 @@ function parseCSV(csvText: string): Array<{ Question: string; Answer: string; St
         if (inQuotes) {
             if (char === '"') {
                 if (nextChar === '"') {
-                    // エスケープされたダブルクォート
                     currentField += '"';
-                    i++; // 次の文字をスキップ
+                    i++;
                 } else {
-                    // クォート終了
                     inQuotes = false;
                 }
             } else {
@@ -197,7 +248,7 @@ function parseCSV(csvText: string): Array<{ Question: string; Answer: string; St
                 currentField = "";
                 rows.push(currentRow);
                 currentRow = [];
-                i++; // \n をスキップ
+                i++;
             } else if (char === '\n') {
                 currentRow.push(currentField);
                 currentField = "";
@@ -209,7 +260,6 @@ function parseCSV(csvText: string): Array<{ Question: string; Answer: string; St
         }
     }
 
-    // 最後のフィールドと行を追加
     if (currentField || currentRow.length > 0) {
         currentRow.push(currentField);
         rows.push(currentRow);
