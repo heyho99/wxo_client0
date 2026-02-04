@@ -19,11 +19,10 @@ async function main(workbook: ExcelScript.Workbook) {
 
     // Code Engine Function のエンドポイント
     // ※デプロイ後に実際のURLに置き換えてください
-    const CODE_ENGINE_URL = "https://your-code-engine-function.us-south.codeengine.appdomain.cloud/";
+    const CODE_ENGINE_URL = "https://wxo-test-auto.25f0qwsr2onp.us-south.codeengine.appdomain.cloud/";
 
-    // WXO Agent ID
-    // ※使用するエージェントのIDに置き換えてください
-    const WXO_AGENT_ID = "27e6dff3-4f30-42d4-b49a-d5c697328009";
+    // Agent IDを読み取るセル (E1)
+    const agentIdCell = "E1";
 
     // シート設定
     const sheetName = "Sheet1"; // 対象シート名
@@ -45,6 +44,14 @@ async function main(workbook: ExcelScript.Workbook) {
     // ヘッダー設定
     const headerRange = sheet.getRange("A1:C1");
     headerRange.setValues([["Question", "Answer", "Status"]]);
+
+    // Agent IDの読み取り
+    const agentId = String(sheet.getRange(agentIdCell).getValue() || "").trim();
+    if (!agentId) {
+        console.log(`エラー: セル ${agentIdCell} にAgent IDが設定されていません。`);
+        return;
+    }
+    console.log(`Agent ID: ${agentId}`);
 
     // ヘッダーのフォーマット（太字、背景色）
     const headerFormat = headerRange.getFormat();
@@ -102,7 +109,7 @@ async function main(workbook: ExcelScript.Workbook) {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ agent_id: WXO_AGENT_ID, questions: questions })
+            body: JSON.stringify({ agent_id: agentId, questions: questions })
         });
 
         if (!response.ok) {
